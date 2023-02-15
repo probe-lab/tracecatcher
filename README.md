@@ -46,7 +46,7 @@ Run the daemon by executing `$GOBIN/tracecatcher` and use command line options t
  - `--db-name` - name of the database to use
  - `--db-password` - password to use when connecting the the database
  - `--db-user`- user to use when connecting the the database
- - `--db-sslmode` - sslmode to use when connecting the the database
+ - `--db-sslmode` - sslmode to use when connecting the the database (default: "prefer")
  - `--batch-size` - set the size of query batches to use when inserting into the database (default: 100)
 
 Run `$GOBIN/tracecatcher --help` to see the full list of options. 
