@@ -65,14 +65,14 @@ Set `ElasticSearchTracer` to the address of TraceCatcher.
 
 ```toml
 [Pubsub]
-ElasticSearchTracer = "localhost:5151"
+ElasticSearchTracer = "http://localhost:5151/"
 ElasticSearchIndex = "traces"
 ```
 
 These settings can also be specified using environment variables:
 
 ```
-LOTUS_PUBSUB_ELASTICSEARCHTRACER=localhost:5151
+LOTUS_PUBSUB_ELASTICSEARCHTRACER=http://localhost:5151/
 LOTUS_PUBSUB_ELASTICSEARCHINDEX=traces
 ```
 
