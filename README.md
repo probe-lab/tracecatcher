@@ -24,7 +24,7 @@ The following trace events are supported:
 | prune              | prune_event                        |
 | peer_score         | peer_score_event, peer_score_topic |   
 
-The follwoing event types are not yet supported:
+The following event types are not yet supported:
 
  - recv_rpv
  - send_rpc
