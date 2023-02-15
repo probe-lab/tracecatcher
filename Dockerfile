@@ -27,5 +27,3 @@ COPY --from=builder $SRC_PATH/tracecatcher /usr/local/bin/tracecatcher
 COPY --from=builder /etc/ssl/certs /etc/ssl/certs
 
 ENTRYPOINT ["/usr/local/bin/tracecatcher"]
-
-CMD ["--help"]
