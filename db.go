@@ -684,6 +684,7 @@ var eventDefs = map[EventType]EventDef{
 				peer_id               TEXT        NOT NULL,
 				timestamp             TIMESTAMPTZ NOT NULL,
 				other_peer_id         TEXT        NOT NULL,
+				score				  FLOAT8	  NOT NULL,
 				app_specific_score    FLOAT8      NOT NULL,
 				ip_colocation_factor  FLOAT8      NOT NULL,
 				behaviour_penalty     FLOAT8      NOT NULL,
@@ -712,7 +713,7 @@ var eventDefs = map[EventType]EventDef{
 			logger := slog.With("event_type", "peer_score")
 			b := new(pgx.Batch)
 
-			parentCols := []string{"peer_id", "timestamp", "other_peer_id", "app_specific_score", "ip_colocation_factor", "behaviour_penalty"}
+			parentCols := []string{"peer_id", "timestamp", "other_peer_id", "score", "app_specific_score", "ip_colocation_factor", "behaviour_penalty"}
 			childCols := []string{"peer_score_event_id", "topic", "time_in_mesh", "first_message_deliveries", "mesh_message_deliveries", "invalid_message_deliveries"}
 
 			eventCount := 0
@@ -766,6 +767,7 @@ var eventDefs = map[EventType]EventDef{
 					peerID.String(),
 					time.Unix(0, *ev.Timestamp),
 					otherPeerID.String(),
+					sub.Score,
 					sub.AppSpecificScore,
 					sub.IPColocationFactor,
 					sub.BehaviourPenalty,
