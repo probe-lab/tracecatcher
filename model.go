@@ -164,6 +164,21 @@ type SubMetaEvent struct {
 	Topic     *string `json:"topic,omitempty"`
 }
 
+func (rpc *RPCMetaEvent) Type() RPCMessageType {
+	if len(rpc.Messages) > 0 {
+		return BroadcastMessage
+	}
+	if rpc.Control != nil {
+		if len(rpc.Control.Ihave) > 0 {
+			return IhaveMessage
+		}
+		if len(rpc.Control.Iwant) > 0 {
+			return IwantMessage
+		}
+	}
+	return UntraceableMessage
+}
+
 type ControlMetaEvent struct {
 	Ihave []*ControlIHaveMetaEvent `json:"ihave,omitempty"`
 	Iwant []*ControlIWantMetaEvent `json:"iwant,omitempty"`
