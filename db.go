@@ -730,12 +730,12 @@ var eventDefs = map[EventType]EventDef{
 				}
 				peerID, err := getPeerIDFromTraceBytes(ev.PeerID)
 				if err != nil {
-					logger.Debug("error", err, "peer_id", ev.PeerID)
+					logger.Debug("skipping event, bad peer id", "error", err, "peer_id", ev.PeerID)
 				}
 
 				otherPeerID, err := getPeerIDFromTraceBytes(sub.PeerID)
 				if err != nil {
-					logger.Debug("error", err, "peer_id", sub.PeerID)
+					logger.Debug("skipping event, bad remote peer id", "error", err, "peer_id", sub.PeerID)
 				}
 
 				values := make([]any, 0, len(parentCols)+len(sub.Topics)*len(childCols))
@@ -837,7 +837,7 @@ var eventDefs = map[EventType]EventDef{
 						childColsLen = 2 // (rpc_event_id, message_id)
 					}
 				case UntraceableMessage:
-					logger.Warn("received unsupported SendRPC event", ev)
+					logger.Warn("received unsupported SendRPC event", "msg_type", ev.SendRPC.Meta)
 					continue
 				}
 				// append parents values
@@ -923,12 +923,12 @@ var eventDefs = map[EventType]EventDef{
 				// Get Parent info
 				peerID, err := peer.IDFromBytes([]byte(ev.PeerID))
 				if err != nil {
-					logger.Debug("skipping event, bad peer id", err, "peer_id", ev.PeerID)
+					logger.Debug("skipping event, bad peer id", "error", err, "peer_id", ev.PeerID)
 					continue
 				}
 				remotePeerId, err := peer.IDFromBytes([]byte(ev.RecvRPC.ReceivedFrom))
 				if err != nil {
-					logger.Debug("skipping event, bad peer id", err, "peer_id", ev.PeerID)
+					logger.Debug("skipping event, bad peer id", "error", err, "peer_id", ev.RecvRPC.ReceivedFrom)
 					continue
 				}
 
@@ -969,7 +969,7 @@ var eventDefs = map[EventType]EventDef{
 						childColsLen = 2 // (rpc_event_id, message_id)
 					}
 				case UntraceableMessage:
-					logger.Warn("received unsupported RecvRPC event", ev)
+					logger.Warn("received unsupported RecvRPC event", "msg_type", ev.RecvRPC.Meta)
 					continue
 				}
 

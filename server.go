@@ -3,7 +3,6 @@ package main
 import (
 	"bytes"
 	"encoding/json"
-	"fmt"
 	"io"
 	"net/http"
 	"time"
@@ -71,17 +70,16 @@ func (s *Server) BulkTraceHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	} else {
 		reqDec := json.NewDecoder(bytes.NewReader(reqBuf.Bytes()))
-	decoderLoop:
 		for reqDec.More() {
 			var tracEv TraceEvent
 			decErr := reqDec.Decode(&tracEv)
 			if decErr == io.EOF {
-				break decoderLoop
+				break
 			} else if decErr != nil {
 				total++
 				failed++
 				slog.Error("decoding ES trace:", decErr)
-				continue decoderLoop
+				continue
 			} else {
 				total++
 				if tracEv.Type != nil {
@@ -90,14 +88,14 @@ func (s *Server) BulkTraceHandler(w http.ResponseWriter, r *http.Request) {
 				} else {
 					empty++
 				}
-				continue decoderLoop
+				continue
 			}
 		}
-		slog.Info(fmt.Sprintf("received bulk resp: total %d suc %d, emtpy %d, failed %d",
-			total,
-			successful,
-			empty,
-			failed),
+		slog.Debug("received bulk request",
+			"total", total,
+			"successful", successful,
+			"empty", empty,
+			"failed", failed,
 		)
 		// compose reply
 		finT := time.Since(iniT)
@@ -105,6 +103,7 @@ func (s *Server) BulkTraceHandler(w http.ResponseWriter, r *http.Request) {
 		jres, err := json.Marshal(bulkResp)
 		if err != nil {
 			slog.Error("unable to compose bulk response", err)
+			w.WriteHeader(http.StatusBadRequest)
 		}
 		w.Write(jres)
 	}
