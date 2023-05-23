@@ -679,24 +679,25 @@ var eventDefs = map[EventType]EventDef{
 	EventTypePeerScore: {
 		Name: "peer_score_event",
 		DDL: `
-			CREATE TABLE IF NOT EXISTS peer_score_event (
+			CREATE TABLE IF NOT EXISTS peer_score_event_v2 (
 			    id                    INT         GENERATED ALWAYS AS IDENTITY,
 				peer_id               TEXT        NOT NULL,
 				timestamp             TIMESTAMPTZ NOT NULL,
 				other_peer_id         TEXT        NOT NULL,
+				score				  FLOAT8	  NOT NULL,
 				app_specific_score    FLOAT8      NOT NULL,
 				ip_colocation_factor  FLOAT8      NOT NULL,
 				behaviour_penalty     FLOAT8      NOT NULL,
 			    PRIMARY KEY (id)
 			);
 
-			CREATE INDEX IF NOT EXISTS idx_peer_score_event_timestamp       ON peer_score_event (timestamp);
-			CREATE INDEX IF NOT EXISTS idx_peer_score_event_peer_id         ON peer_score_event (peer_id);
-			CREATE INDEX IF NOT EXISTS idx_peer_score_event_other_peer_id   ON peer_score_event (other_peer_id);
+			CREATE INDEX IF NOT EXISTS idx_peer_score_event_v2_timestamp       ON peer_score_event_v2 (timestamp);
+			CREATE INDEX IF NOT EXISTS idx_peer_score_event_v2_peer_id         ON peer_score_event_v2 (peer_id);
+			CREATE INDEX IF NOT EXISTS idx_peer_score_event_v2_other_peer_id   ON peer_score_event_v2 (other_peer_id);
 
-			CREATE TABLE IF NOT EXISTS peer_score_topic (
+			CREATE TABLE IF NOT EXISTS peer_score_topic_v2 (
 			    id                          INT         GENERATED ALWAYS AS IDENTITY,
-			    peer_score_event_id         INT         NOT NULL,
+			    peer_score_event_id      INT			NOT NULL,
 				topic                       TEXT        NOT NULL,
 				time_in_mesh                INTERVAL    NOT NULL,
 				first_message_deliveries    FLOAT8      NOT NULL,
@@ -705,14 +706,14 @@ var eventDefs = map[EventType]EventDef{
 			    PRIMARY KEY (id)
 			);
 
-			CREATE INDEX IF NOT EXISTS idx_peer_score_topic_peer_score_event_id   ON peer_score_topic (peer_score_event_id);
-			CREATE INDEX IF NOT EXISTS idx_peer_score_topic_topic                 ON peer_score_topic USING hash (topic);
+			CREATE INDEX IF NOT EXISTS idx_peer_score_topic_v2_peer_score_event_id   ON peer_score_topic_v2 (peer_score_event_id);
+			CREATE INDEX IF NOT EXISTS idx_peer_score_topic_v2_topic                 ON peer_score_topic_v2 USING hash (topic);
 		`,
 		BatchInsert: func(ctx context.Context, evs []*TraceEvent) (*pgx.Batch, error) {
 			logger := slog.With("event_type", "peer_score")
 			b := new(pgx.Batch)
 
-			parentCols := []string{"peer_id", "timestamp", "other_peer_id", "app_specific_score", "ip_colocation_factor", "behaviour_penalty"}
+			parentCols := []string{"peer_id", "timestamp", "other_peer_id", "score", "app_specific_score", "ip_colocation_factor", "behaviour_penalty"}
 			childCols := []string{"peer_score_event_id", "topic", "time_in_mesh", "first_message_deliveries", "mesh_message_deliveries", "invalid_message_deliveries"}
 
 			eventCount := 0
@@ -766,6 +767,7 @@ var eventDefs = map[EventType]EventDef{
 					peerID.String(),
 					time.Unix(0, *ev.Timestamp),
 					otherPeerID.String(),
+					sub.Score,
 					sub.AppSpecificScore,
 					sub.IPColocationFactor,
 					sub.BehaviourPenalty,
@@ -784,7 +786,7 @@ var eventDefs = map[EventType]EventDef{
 					)
 				}
 
-				sql := buildBulkInsertParentChild("peer_score_event", parentCols, "peer_score_topic", childCols, childRowCount)
+				sql := buildBulkInsertParentChild("peer_score_event_v2", parentCols, "peer_score_topic_v2", childCols, childRowCount)
 				b.Queue(sql, values...)
 				eventCount++
 			}
