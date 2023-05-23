@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/base64"
+	"encoding/hex"
 	"fmt"
 	"strconv"
 	"strings"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/libp2p/go-libp2p/core/peer"
+	"github.com/pkg/errors"
 	"golang.org/x/exp/slog"
 )
 
@@ -114,7 +116,6 @@ var eventDefs = map[EventType]EventDef{
 					logger.Debug("skipping event, not a publish message event", "type", ev.Type)
 					continue
 				}
-
 				peerID, err := peer.IDFromBytes([]byte(ev.PeerID))
 				if err != nil {
 					logger.Debug("skipping event, bad peer id", "peer_id", ev.PeerID)
@@ -124,7 +125,7 @@ var eventDefs = map[EventType]EventDef{
 				rowCount++
 				values = append(values, peerID.String())
 				values = append(values, time.Unix(0, *ev.Timestamp))
-				values = append(values, string(sub.MessageID))
+				values = append(values, hex.EncodeToString(sub.MessageID))
 				values = append(values, derefString(sub.Topic, ""))
 			}
 
@@ -187,7 +188,7 @@ var eventDefs = map[EventType]EventDef{
 				rowCount++
 				values = append(values, peerID.String())
 				values = append(values, time.Unix(0, *ev.Timestamp))
-				values = append(values, string(sub.MessageID))
+				values = append(values, hex.EncodeToString(sub.MessageID))
 				values = append(values, derefString(sub.Topic, ""))
 				values = append(values, receivedFromPeerID.String())
 				values = append(values, derefString(sub.Reason, ""))
@@ -251,7 +252,7 @@ var eventDefs = map[EventType]EventDef{
 				rowCount++
 				values = append(values, peerID.String())
 				values = append(values, time.Unix(0, *ev.Timestamp))
-				values = append(values, string(sub.MessageID))
+				values = append(values, hex.EncodeToString(sub.MessageID))
 				values = append(values, derefString(sub.Topic, ""))
 				values = append(values, receivedFromPeerID.String())
 			}
@@ -314,7 +315,7 @@ var eventDefs = map[EventType]EventDef{
 				rowCount++
 				values = append(values, peerID.String())
 				values = append(values, time.Unix(0, *ev.Timestamp))
-				values = append(values, string(sub.MessageID))
+				values = append(values, hex.EncodeToString(sub.MessageID))
 				values = append(values, derefString(sub.Topic, ""))
 				values = append(values, receivedFromPeerID.String())
 			}
@@ -727,37 +728,14 @@ var eventDefs = map[EventType]EventDef{
 					logger.Debug("skipping event, not a peer score event", "type", ev.Type)
 					continue
 				}
-
-				// TODO: remove this terrible hack caused by Lotus putting pretty peer ids into a byte slice and encoding to json
-				// See https://github.com/filecoin-project/lotus/pull/10271
-				peerID, err := peer.IDFromBytes(ev.PeerID)
+				peerID, err := getPeerIDFromTraceBytes(ev.PeerID)
 				if err != nil {
-					decoded, err := base64.StdEncoding.DecodeString(string(ev.PeerID))
-					if err != nil {
-						logger.Debug("skipping event, guessing peer id encoding", "error", err, "peer_id", ev.PeerID)
-						continue
-					}
-
-					peerID, err = peer.IDFromBytes(decoded)
-					if err != nil {
-						logger.Debug("skipping event, bad peer id", "error", err, "peer_id", ev.PeerID)
-						continue
-					}
+					logger.Debug("skipping event, bad peer id", "error", err, "peer_id", ev.PeerID)
 				}
 
-				otherPeerID, err := peer.IDFromBytes(sub.PeerID)
+				otherPeerID, err := getPeerIDFromTraceBytes(sub.PeerID)
 				if err != nil {
-					decoded, err := base64.StdEncoding.DecodeString(string(sub.PeerID))
-					if err != nil {
-						logger.Debug("skipping event, guessing peer id encoding", "error", err, "peer_id", ev.PeerID)
-						continue
-					}
-
-					peerID, err = peer.IDFromBytes(decoded)
-					if err != nil {
-						logger.Debug("skipping event, bad peer id", "error", err, "peer_id", ev.PeerID)
-						continue
-					}
+					logger.Debug("skipping event, bad remote peer id", "error", err, "peer_id", sub.PeerID)
 				}
 
 				values := make([]any, 0, len(parentCols)+len(sub.Topics)*len(childCols))
@@ -793,7 +771,356 @@ var eventDefs = map[EventType]EventDef{
 			return b, nil
 		},
 	},
+	// Send and Receive RPCs share table to make
+	EventTypeSendRPC: {
+		Name: "rpc_event",
+		DDL:  CreateRPCsTable,
+		BatchInsert: func(ctx context.Context, evs []*TraceEvent) (*pgx.Batch, error) {
+			logger := slog.With("event_type", "sent_rpc")
+			b := new(pgx.Batch)
+
+			// get the type of RPC that we are have
+			rpcDirection := SentRPC
+			parentCols := []string{"peer_id", "timestamp", "remote_peer_id", "direction"}
+
+			eventCount := 0
+			for _, ev := range evs {
+				if ev.Timestamp == nil {
+					logger.Debug("skipping event, no timestamp")
+					continue
+				}
+				// ID of the peer submitting traces
+				peerID, err := peer.IDFromBytes([]byte(ev.PeerID))
+				if err != nil {
+					logger.Debug("skipping event, bad peer id", err, "peer_id", ev.PeerID)
+					continue
+				}
+				// Get Parent info
+				remotePeerId, err := peer.IDFromBytes([]byte(ev.SendRPC.SendTo))
+				if err != nil {
+					logger.Debug("skipping event, bad peer id", err, "peer_id", ev.PeerID)
+					continue
+				}
+				// Check the type of subevent that we have received
+				var mgs []*MessageMetaEvent
+				var ihaves []*ControlIHaveMetaEvent
+				var iwants []*ControlIWantMetaEvent
+				childLen := 0
+				childColsLen := 0
+
+				msgType := ev.SendRPC.Meta.Type()
+				switch msgType {
+				case BroadcastMessage:
+					mgs = ev.SendRPC.Meta.Messages
+					if len(mgs) > 0 {
+						childLen = len(mgs)
+						childColsLen = 3 // (rpc_event_id, topic, message_id)
+					}
+				case IhaveMessage:
+					ihaves = ev.SendRPC.Meta.Control.Ihave
+					if len(ihaves) > 0 {
+						ihLen := 0
+						for _, ih := range ihaves {
+							ihLen += len(ih.MessageIDs)
+						}
+						childLen = len(ihaves) + ihLen
+						childColsLen = 3 // (rpc_event_id, topic, message_id)
+					}
+				case IwantMessage:
+					iwants = ev.SendRPC.Meta.Control.Iwant
+					if len(iwants) > 0 {
+						iwLen := 0
+						for _, iw := range iwants {
+							iwLen += len(iw.MessageIDs)
+						}
+						childLen = len(iwants) + iwLen
+						childColsLen = 2 // (rpc_event_id, message_id)
+					}
+				case UntraceableMessage:
+					logger.Warn("received unsupported SendRPC event", "msg_type", ev.SendRPC.Meta)
+					continue
+				}
+				// append parents values
+				values := make([]any, 0, len(parentCols)+childLen*childColsLen)
+				values = append(values,
+					peerID.String(),
+					time.Unix(0, *ev.Timestamp),
+					remotePeerId.String(),
+					rpcDirection,
+				)
+
+				// check the type of subevents we are measuring ([]broadcast/[]ihave/[]iwant)
+				// For now, we will drom the ( subcribtion/graft/prunes) as they are already tracked in
+				// previous events
+				var sql string
+				var childTable string
+				var childRowCount int
+				var childCols []string
+
+				switch msgType {
+				case BroadcastMessage:
+					childTable = "broadcast_message"
+					childCols = []string{"rpc_event_id", "topic", "message_id"}
+					for _, bm := range mgs {
+						childRowCount++
+						values = append(values,
+							derefString(bm.Topic, ""),
+							hex.EncodeToString(bm.MessageID),
+						)
+					}
+				case IhaveMessage:
+					childTable = "ihave_message"
+					childCols = []string{"rpc_event_id", "topic", "message_id"}
+					for _, ih := range ihaves {
+						for _, ihmsg := range ih.MessageIDs {
+							childRowCount++
+							values = append(values,
+								derefString(ih.Topic, ""),
+								hex.EncodeToString(ihmsg),
+							)
+						}
+					}
+				case IwantMessage:
+					childTable = "iwant_message"
+					childCols = []string{"rpc_event_id", "message_id"}
+					for _, iw := range iwants {
+						for _, iwmsg := range iw.MessageIDs {
+							childRowCount++
+							values = append(values,
+								hex.EncodeToString(iwmsg),
+							)
+						}
+					}
+				default:
+					slog.Warn("unrecognized msg type of Sent RPC trace")
+					continue
+				}
+				sql = buildBulkInsertParentChild("rpc_event", parentCols, childTable, childCols, childRowCount)
+				b.Queue(sql, values...)
+				eventCount++
+			}
+			return b, nil
+		},
+	},
+
+	EventTypeRecvRPC: {
+		Name: "rpc_event",
+		DDL:  CreateRPCsTable,
+		BatchInsert: func(ctx context.Context, evs []*TraceEvent) (*pgx.Batch, error) {
+			logger := slog.With("event_type", "recv_rpc")
+			b := new(pgx.Batch)
+
+			// get the type of RPC that we are have
+			rpcDirection := RecvRPC
+			parentCols := []string{"peer_id", "timestamp", "remote_peer_id", "direction"}
+
+			eventCount := 0
+			for _, ev := range evs {
+				if ev.Timestamp == nil {
+					logger.Debug("skipping event, no timestamp")
+					continue
+				}
+				// Get Parent info
+				peerID, err := peer.IDFromBytes([]byte(ev.PeerID))
+				if err != nil {
+					logger.Debug("skipping event, bad peer id", "error", err, "peer_id", ev.PeerID)
+					continue
+				}
+				remotePeerId, err := peer.IDFromBytes([]byte(ev.RecvRPC.ReceivedFrom))
+				if err != nil {
+					logger.Debug("skipping event, bad peer id", "error", err, "peer_id", ev.RecvRPC.ReceivedFrom)
+					continue
+				}
+
+				// Check the type of subevent that we have received
+				var mgs []*MessageMetaEvent
+				var ihaves []*ControlIHaveMetaEvent
+				var iwants []*ControlIWantMetaEvent
+				childLen := 0
+				childColsLen := 0
+
+				msgType := ev.RecvRPC.Meta.Type()
+				switch msgType {
+				case BroadcastMessage:
+					mgs = ev.RecvRPC.Meta.Messages
+					if len(mgs) > 0 {
+						childLen = len(mgs)
+						childColsLen = 3
+					}
+				case IhaveMessage:
+					ihaves = ev.RecvRPC.Meta.Control.Ihave
+					if len(ihaves) > 0 {
+						ihLen := 0
+						for _, ih := range ihaves {
+							ihLen += len(ih.MessageIDs)
+						}
+						childLen = len(ihaves) + ihLen
+						childColsLen = 3 // (rpc_event_id, topic, message_id)
+					}
+
+				case IwantMessage:
+					iwants = ev.RecvRPC.Meta.Control.Iwant
+					if len(iwants) > 0 {
+						iwLen := 0
+						for _, iw := range iwants {
+							iwLen += len(iw.MessageIDs)
+						}
+						childLen = len(iwants) + iwLen
+						childColsLen = 2 // (rpc_event_id, message_id)
+					}
+				case UntraceableMessage:
+					logger.Warn("received unsupported RecvRPC event", "msg_type", ev.RecvRPC.Meta)
+					continue
+				}
+
+				// append parents values
+				values := make([]any, 0, len(parentCols)+childLen*childColsLen)
+				values = append(values,
+					peerID.String(),
+					time.Unix(0, *ev.Timestamp),
+					remotePeerId.String(),
+					rpcDirection,
+				)
+
+				// check the type of subevents we are measuring ([]broadcast/[]ihave/[]iwant)
+				// For now, we will drom the ( subcribtion/graft/prunes) as they are already tracked in
+				// previous events
+				var sql string
+				var childTable string
+				var childRowCount int
+				var childCols []string
+
+				switch msgType {
+				case BroadcastMessage:
+					childTable = "broadcast_message"
+					childCols = []string{"rpc_event_id", "topic", "message_id"}
+					for _, bm := range mgs {
+						childRowCount++
+						values = append(values,
+							derefString(bm.Topic, ""),
+							hex.EncodeToString(bm.MessageID),
+						)
+					}
+				case IhaveMessage:
+					childTable = "ihave_message"
+					childCols = []string{"rpc_event_id", "topic", "message_id"}
+					for _, ih := range ihaves {
+						for _, ihmsg := range ih.MessageIDs {
+							childRowCount++
+							values = append(values,
+								derefString(ih.Topic, ""),
+								hex.EncodeToString(ihmsg),
+							)
+						}
+					}
+				case IwantMessage:
+					childTable = "iwant_message"
+					childCols = []string{"rpc_event_id", "message_id"}
+					for _, iw := range iwants {
+						for _, iwmsg := range iw.MessageIDs {
+							childRowCount++
+							values = append(values,
+								hex.EncodeToString(iwmsg),
+							)
+						}
+					}
+				default:
+					slog.Warn("unrecognized msg type of Sent RPC trace")
+					continue
+				}
+
+				sql = buildBulkInsertParentChild("rpc_event", parentCols, childTable, childCols, childRowCount)
+				b.Queue(sql, values...)
+				eventCount++
+			}
+			return b, nil
+		},
+	},
 }
+
+// Utils for the Sent/Recv messages
+type RPCMessageType int8
+
+const (
+	UntraceableMessage RPCMessageType = iota
+	BroadcastMessage
+	IhaveMessage
+	IwantMessage
+)
+
+func (msg *RPCMessageType) Key() string {
+	switch *msg {
+	case UntraceableMessage:
+		return "untraceable_rpc_message"
+	case BroadcastMessage:
+		return "broadcast_message"
+	case IhaveMessage:
+		return "ihave_message"
+	case IwantMessage:
+		return "iwant_message"
+	default:
+		return "untraceable_rpc_message"
+	}
+}
+
+type RPCDirection string
+
+var (
+	SentRPC RPCDirection = "send"
+	RecvRPC RPCDirection = "recv"
+
+	CreateRPCsTable = `
+		CREATE TABLE IF NOT EXISTS rpc_event(
+			id				INT GENERATED ALWAYS AS IDENTITY,
+			peer_id			TEXT NOT NULL,
+			timestamp		TIMESTAMPTZ NOT NULL,
+			remote_peer_id	TEXT NOT NULL,
+			direction TEXT	NOT NULL, 
+			PRIMARY KEY(id)
+		);
+
+		CREATE INDEX IF NOT EXISTS idx_rpc_event_timestamp		ON rpc_event (timestamp);
+		CREATE INDEX IF NOT EXISTS idx_rpc_event_peer_id		ON rpc_event (peer_id);
+		CREATE INDEX IF NOT EXISTS idx_rpc_event_direction		ON rpc_event (direction);
+		CREATE INDEX IF NOT EXISTS idx_rpc_event_remote_peer_id ON rpc_event (remote_peer_id);
+		
+		CREATE TABLE IF NOT EXISTS broadcast_message (
+			id				INT GENERATED ALWAYS AS IDENTITY,
+			rpc_event_id	INT NOT NULL,
+			topic			TEXT NOT NULL,
+			message_id		TEXT NOT NULL,
+			PRIMARY KEY(id)
+		);
+
+		CREATE INDEX IF NOT EXISTS idx_rpc_event_id ON broadcast_message (rpc_event_id);
+		CREATE INDEX IF NOT EXISTS idx_topic		ON broadcast_message USING HASH (topic);
+		CREATE INDEX IF NOT EXISTS idx_message_id	ON broadcast_message (message_id);
+
+		
+		CREATE TABLE IF NOT EXISTS ihave_message (
+			id				INT GENERATED ALWAYS AS IDENTITY,
+			rpc_event_id	INT NOT NULL,
+			topic			TEXT NOT NULL,
+			message_id		TEXT NOT NULL,
+			PRIMARY KEY(id)
+		);
+
+		CREATE INDEX IF NOT EXISTS idx_rpc_event_id ON ihave_message (rpc_event_id);
+		CREATE INDEX IF NOT EXISTS idx_topic		ON ihave_message USING HASH (topic);
+		CREATE INDEX IF NOT EXISTS idx_message_id	ON ihave_message (message_id);
+
+
+		CREATE TABLE IF NOT EXISTS iwant_message (
+			id				INT GENERATED ALWAYS AS IDENTITY,
+			rpc_event_id	INT NOT NULL,
+			message_id		TEXT NOT NULL,
+			PRIMARY KEY(id)
+		);
+
+		CREATE INDEX IF NOT EXISTS idx_rpc_event_id ON iwant_message (rpc_event_id);
+		CREATE INDEX IF NOT EXISTS idx_message_id	ON iwant_message (message_id);
+	`
+)
 
 func derefString(s *string, def string) string {
 	if s == nil {
@@ -886,4 +1213,21 @@ func buildBulkInsertParentChild(parentTable string, parentColumns []string, chil
 		b.WriteString(")")
 	}
 	return b.String()
+}
+
+// compose the peerID from the received Trace []bytes
+func getPeerIDFromTraceBytes(bts []byte) (peer.ID, error) {
+	// TODO: remove this when https://github.com/filecoin-project/lotus/pull/10271 is merged
+	peerID, err := peer.IDFromBytes(bts)
+	if err != nil {
+		decoded, err := base64.StdEncoding.DecodeString(string(bts))
+		if err != nil {
+			return peerID, errors.Wrap(err, "skipping event, guessing peer id encoding")
+		}
+		peerID, err = peer.IDFromBytes(decoded)
+		if err != nil {
+			return peerID, errors.Wrap(err, "skipping event, bad peer id")
+		}
+	}
+	return peerID, err
 }
