@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/base64"
 	"encoding/hex"
 	"fmt"
 	"strconv"
@@ -11,7 +10,6 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/libp2p/go-libp2p/core/peer"
-	"github.com/pkg/errors"
 	"golang.org/x/exp/slog"
 )
 
@@ -728,12 +726,12 @@ var eventDefs = map[EventType]EventDef{
 					logger.Debug("skipping event, not a peer score event", "type", ev.Type)
 					continue
 				}
-				peerID, err := getPeerIDFromTraceBytes(ev.PeerID)
+				peerID, err := peer.IDFromBytes(ev.PeerID)
 				if err != nil {
 					logger.Debug("skipping event, bad peer id", "error", err, "peer_id", ev.PeerID)
 				}
 
-				otherPeerID, err := getPeerIDFromTraceBytes(sub.PeerID)
+				otherPeerID, err := peer.IDFromBytes(sub.PeerID)
 				if err != nil {
 					logger.Debug("skipping event, bad remote peer id", "error", err, "peer_id", sub.PeerID)
 				}
@@ -1213,21 +1211,4 @@ func buildBulkInsertParentChild(parentTable string, parentColumns []string, chil
 		b.WriteString(")")
 	}
 	return b.String()
-}
-
-// compose the peerID from the received Trace []bytes
-func getPeerIDFromTraceBytes(bts []byte) (peer.ID, error) {
-	// TODO: remove this when https://github.com/filecoin-project/lotus/pull/10271 is merged
-	peerID, err := peer.IDFromBytes(bts)
-	if err != nil {
-		decoded, err := base64.StdEncoding.DecodeString(string(bts))
-		if err != nil {
-			return peerID, errors.Wrap(err, "skipping event, guessing peer id encoding")
-		}
-		peerID, err = peer.IDFromBytes(decoded)
-		if err != nil {
-			return peerID, errors.Wrap(err, "skipping event, bad peer id")
-		}
-	}
-	return peerID, err
 }

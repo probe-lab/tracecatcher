@@ -8,7 +8,6 @@ require (
 	github.com/gorilla/mux v1.8.0
 	github.com/jackc/pgx/v5 v5.3.0
 	github.com/libp2p/go-libp2p v0.25.1
-	github.com/pkg/errors v0.9.1
 	github.com/prometheus/client_golang v1.14.0
 	github.com/urfave/cli/v2 v2.24.3
 	go.opencensus.io v0.24.0
