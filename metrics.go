@@ -11,10 +11,18 @@ import (
 	"go.opencensus.io/tag"
 )
 
-var eventTypeTag, _ = tag.NewKey("event_type")
+var (
+	eventTypeTag, _ = tag.NewKey("event_type")
+	endpointTag, _  = tag.NewKey("endpoint")
+)
 
 func eventTypeContext(ctx context.Context, name string) context.Context {
 	ctx, _ = tag.New(ctx, tag.Upsert(eventTypeTag, name))
+	return ctx
+}
+
+func endpointContext(ctx context.Context, endpoint string) context.Context {
+	ctx, _ = tag.New(ctx, tag.Upsert(endpointTag, endpoint))
 	return ctx
 }
 
