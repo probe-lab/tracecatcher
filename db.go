@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/base64"
 	"encoding/hex"
 	"fmt"
 	"strconv"
@@ -11,7 +10,6 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/libp2p/go-libp2p/core/peer"
-	"github.com/pkg/errors"
 	"golang.org/x/exp/slog"
 )
 
@@ -73,7 +71,7 @@ func ensureDatabaseSchema(ctx context.Context, conn *pgx.Conn) error {
 	return nil
 }
 
-type BatchInsertFunc func(context.Context, []*TraceEvent) (*pgx.Batch, error)
+type BatchInsertFunc func(context.Context, []*TraceEvent) (*pgx.Batch, int, error)
 
 type EventDef struct {
 	Name        string
@@ -98,7 +96,7 @@ var eventDefs = map[EventType]EventDef{
 			CREATE INDEX IF NOT EXISTS idx_publish_message_event_peer_id   ON publish_message_event (peer_id);
 			CREATE INDEX IF NOT EXISTS idx_publish_message_event_topic     ON publish_message_event USING hash (topic);
 		`,
-		BatchInsert: func(ctx context.Context, evs []*TraceEvent) (*pgx.Batch, error) {
+		BatchInsert: func(ctx context.Context, evs []*TraceEvent) (*pgx.Batch, int, error) {
 			logger := slog.With("event_type", "publish_message")
 			b := new(pgx.Batch)
 
@@ -131,7 +129,7 @@ var eventDefs = map[EventType]EventDef{
 
 			sql := buildBulkInsert("publish_message_event", cols, rowCount)
 			b.Queue(sql, values...)
-			return b, nil
+			return b, rowCount, nil
 		},
 	},
 
@@ -154,7 +152,7 @@ var eventDefs = map[EventType]EventDef{
 			CREATE INDEX IF NOT EXISTS idx_reject_message_event_topic           ON reject_message_event USING hash (topic);
 			CREATE INDEX IF NOT EXISTS idx_reject_message_event_received_from   ON reject_message_event (received_from);
 		`,
-		BatchInsert: func(ctx context.Context, evs []*TraceEvent) (*pgx.Batch, error) {
+		BatchInsert: func(ctx context.Context, evs []*TraceEvent) (*pgx.Batch, int, error) {
 			logger := slog.With("event_type", "reject_message")
 			b := new(pgx.Batch)
 
@@ -196,7 +194,7 @@ var eventDefs = map[EventType]EventDef{
 
 			sql := buildBulkInsert("reject_message_event", cols, rowCount)
 			b.Queue(sql, values...)
-			return b, nil
+			return b, rowCount, nil
 		},
 	},
 
@@ -218,7 +216,7 @@ var eventDefs = map[EventType]EventDef{
 			CREATE INDEX IF NOT EXISTS idx_duplicate_message_event_topic           ON duplicate_message_event USING hash (topic);
 			CREATE INDEX IF NOT EXISTS idx_duplicate_message_event_received_from   ON duplicate_message_event (received_from);
 		`,
-		BatchInsert: func(ctx context.Context, evs []*TraceEvent) (*pgx.Batch, error) {
+		BatchInsert: func(ctx context.Context, evs []*TraceEvent) (*pgx.Batch, int, error) {
 			logger := slog.With("event_type", "duplicate_message")
 			b := new(pgx.Batch)
 
@@ -259,7 +257,7 @@ var eventDefs = map[EventType]EventDef{
 
 			sql := buildBulkInsert("duplicate_message_event", cols, rowCount)
 			b.Queue(sql, values...)
-			return b, nil
+			return b, rowCount, nil
 		},
 	},
 
@@ -281,7 +279,7 @@ var eventDefs = map[EventType]EventDef{
 			CREATE INDEX IF NOT EXISTS idx_deliver_message_event_topic           ON deliver_message_event USING hash (topic);
 			CREATE INDEX IF NOT EXISTS idx_deliver_message_event_received_from   ON deliver_message_event (received_from);
 		`,
-		BatchInsert: func(ctx context.Context, evs []*TraceEvent) (*pgx.Batch, error) {
+		BatchInsert: func(ctx context.Context, evs []*TraceEvent) (*pgx.Batch, int, error) {
 			logger := slog.With("event_type", "deliver_message")
 			b := new(pgx.Batch)
 
@@ -322,7 +320,7 @@ var eventDefs = map[EventType]EventDef{
 
 			sql := buildBulkInsert("deliver_message_event", cols, rowCount)
 			b.Queue(sql, values...)
-			return b, nil
+			return b, rowCount, nil
 		},
 	},
 
@@ -342,7 +340,7 @@ var eventDefs = map[EventType]EventDef{
 			CREATE INDEX IF NOT EXISTS idx_add_peer_event_peer_id         ON add_peer_event (peer_id);
 			CREATE INDEX IF NOT EXISTS idx_add_peer_event_other_peer_id   ON add_peer_event (other_peer_id);
 		`,
-		BatchInsert: func(ctx context.Context, evs []*TraceEvent) (*pgx.Batch, error) {
+		BatchInsert: func(ctx context.Context, evs []*TraceEvent) (*pgx.Batch, int, error) {
 			logger := slog.With("event_type", "add_peer")
 			b := new(pgx.Batch)
 
@@ -382,7 +380,7 @@ var eventDefs = map[EventType]EventDef{
 
 			sql := buildBulkInsert("add_peer_event", cols, rowCount)
 			b.Queue(sql, values...)
-			return b, nil
+			return b, rowCount, nil
 		},
 	},
 
@@ -401,7 +399,7 @@ var eventDefs = map[EventType]EventDef{
 			CREATE INDEX IF NOT EXISTS idx_remove_peer_event_peer_id         ON remove_peer_event (peer_id);
 			CREATE INDEX IF NOT EXISTS idx_remove_peer_event_other_peer_id   ON remove_peer_event (other_peer_id);
 		`,
-		BatchInsert: func(ctx context.Context, evs []*TraceEvent) (*pgx.Batch, error) {
+		BatchInsert: func(ctx context.Context, evs []*TraceEvent) (*pgx.Batch, int, error) {
 			logger := slog.With("event_type", "remove_peer")
 			b := new(pgx.Batch)
 
@@ -440,7 +438,7 @@ var eventDefs = map[EventType]EventDef{
 
 			sql := buildBulkInsert("remove_peer_event", cols, rowCount)
 			b.Queue(sql, values...)
-			return b, nil
+			return b, rowCount, nil
 		},
 	},
 
@@ -460,7 +458,7 @@ var eventDefs = map[EventType]EventDef{
 			CREATE INDEX IF NOT EXISTS idx_join_event_topic      ON join_event USING hash (topic);
 		`,
 
-		BatchInsert: func(ctx context.Context, evs []*TraceEvent) (*pgx.Batch, error) {
+		BatchInsert: func(ctx context.Context, evs []*TraceEvent) (*pgx.Batch, int, error) {
 			logger := slog.With("event_type", "join")
 			b := new(pgx.Batch)
 
@@ -493,7 +491,7 @@ var eventDefs = map[EventType]EventDef{
 
 			sql := buildBulkInsert("join_event", cols, rowCount)
 			b.Queue(sql, values...)
-			return b, nil
+			return b, rowCount, nil
 		},
 	},
 
@@ -512,7 +510,7 @@ var eventDefs = map[EventType]EventDef{
 			CREATE INDEX IF NOT EXISTS idx_leave_event_peer_id    ON leave_event (peer_id);
 			CREATE INDEX IF NOT EXISTS idx_leave_event_topic      ON leave_event USING hash (topic);
 		`,
-		BatchInsert: func(ctx context.Context, evs []*TraceEvent) (*pgx.Batch, error) {
+		BatchInsert: func(ctx context.Context, evs []*TraceEvent) (*pgx.Batch, int, error) {
 			logger := slog.With("event_type", "leave")
 			b := new(pgx.Batch)
 
@@ -545,7 +543,7 @@ var eventDefs = map[EventType]EventDef{
 
 			sql := buildBulkInsert("leave_event", cols, rowCount)
 			b.Queue(sql, values...)
-			return b, nil
+			return b, rowCount, nil
 		},
 	},
 
@@ -567,7 +565,7 @@ var eventDefs = map[EventType]EventDef{
 			CREATE INDEX IF NOT EXISTS idx_graft_event_other_peer_id   ON graft_event (other_peer_id);
 		`,
 
-		BatchInsert: func(ctx context.Context, evs []*TraceEvent) (*pgx.Batch, error) {
+		BatchInsert: func(ctx context.Context, evs []*TraceEvent) (*pgx.Batch, int, error) {
 			logger := slog.With("event_type", "graft")
 			b := new(pgx.Batch)
 
@@ -609,7 +607,7 @@ var eventDefs = map[EventType]EventDef{
 
 			sql := buildBulkInsert("graft_event", cols, rowCount)
 			b.Queue(sql, values...)
-			return b, nil
+			return b, rowCount, nil
 		},
 	},
 
@@ -631,7 +629,7 @@ var eventDefs = map[EventType]EventDef{
 			CREATE INDEX IF NOT EXISTS idx_prune_event_other_peer_id   ON prune_event (other_peer_id);
 		`,
 
-		BatchInsert: func(ctx context.Context, evs []*TraceEvent) (*pgx.Batch, error) {
+		BatchInsert: func(ctx context.Context, evs []*TraceEvent) (*pgx.Batch, int, error) {
 			logger := slog.With("event_type", "prune")
 			b := new(pgx.Batch)
 
@@ -673,7 +671,7 @@ var eventDefs = map[EventType]EventDef{
 
 			sql := buildBulkInsert("prune_event", cols, rowCount)
 			b.Queue(sql, values...)
-			return b, nil
+			return b, rowCount, nil
 		},
 	},
 
@@ -710,7 +708,7 @@ var eventDefs = map[EventType]EventDef{
 			CREATE INDEX IF NOT EXISTS idx_peer_score_topic_v2_peer_score_event_id   ON peer_score_topic_v2 (peer_score_event_id);
 			CREATE INDEX IF NOT EXISTS idx_peer_score_topic_v2_topic                 ON peer_score_topic_v2 USING hash (topic);
 		`,
-		BatchInsert: func(ctx context.Context, evs []*TraceEvent) (*pgx.Batch, error) {
+		BatchInsert: func(ctx context.Context, evs []*TraceEvent) (*pgx.Batch, int, error) {
 			logger := slog.With("event_type", "peer_score")
 			b := new(pgx.Batch)
 
@@ -728,12 +726,12 @@ var eventDefs = map[EventType]EventDef{
 					logger.Debug("skipping event, not a peer score event", "type", ev.Type)
 					continue
 				}
-				peerID, err := getPeerIDFromTraceBytes(ev.PeerID)
+				peerID, err := peer.IDFromBytes(ev.PeerID)
 				if err != nil {
 					logger.Debug("skipping event, bad peer id", "error", err, "peer_id", ev.PeerID)
 				}
 
-				otherPeerID, err := getPeerIDFromTraceBytes(sub.PeerID)
+				otherPeerID, err := peer.IDFromBytes(sub.PeerID)
 				if err != nil {
 					logger.Debug("skipping event, bad remote peer id", "error", err, "peer_id", sub.PeerID)
 				}
@@ -768,14 +766,14 @@ var eventDefs = map[EventType]EventDef{
 				b.Queue(sql, values...)
 				eventCount++
 			}
-			return b, nil
+			return b, eventCount, nil
 		},
 	},
 	// Send and Receive RPCs share table to make
 	EventTypeSendRPC: {
 		Name: "rpc_event",
 		DDL:  CreateRPCsTable,
-		BatchInsert: func(ctx context.Context, evs []*TraceEvent) (*pgx.Batch, error) {
+		BatchInsert: func(ctx context.Context, evs []*TraceEvent) (*pgx.Batch, int, error) {
 			logger := slog.With("event_type", "sent_rpc")
 			b := new(pgx.Batch)
 
@@ -899,14 +897,14 @@ var eventDefs = map[EventType]EventDef{
 				b.Queue(sql, values...)
 				eventCount++
 			}
-			return b, nil
+			return b, eventCount, nil
 		},
 	},
 
 	EventTypeRecvRPC: {
 		Name: "rpc_event",
 		DDL:  CreateRPCsTable,
-		BatchInsert: func(ctx context.Context, evs []*TraceEvent) (*pgx.Batch, error) {
+		BatchInsert: func(ctx context.Context, evs []*TraceEvent) (*pgx.Batch, int, error) {
 			logger := slog.With("event_type", "recv_rpc")
 			b := new(pgx.Batch)
 
@@ -1033,7 +1031,7 @@ var eventDefs = map[EventType]EventDef{
 				b.Queue(sql, values...)
 				eventCount++
 			}
-			return b, nil
+			return b, eventCount, nil
 		},
 	},
 }
@@ -1213,21 +1211,4 @@ func buildBulkInsertParentChild(parentTable string, parentColumns []string, chil
 		b.WriteString(")")
 	}
 	return b.String()
-}
-
-// compose the peerID from the received Trace []bytes
-func getPeerIDFromTraceBytes(bts []byte) (peer.ID, error) {
-	// TODO: remove this when https://github.com/filecoin-project/lotus/pull/10271 is merged
-	peerID, err := peer.IDFromBytes(bts)
-	if err != nil {
-		decoded, err := base64.StdEncoding.DecodeString(string(bts))
-		if err != nil {
-			return peerID, errors.Wrap(err, "skipping event, guessing peer id encoding")
-		}
-		peerID, err = peer.IDFromBytes(decoded)
-		if err != nil {
-			return peerID, errors.Wrap(err, "skipping event, bad peer id")
-		}
-	}
-	return peerID, err
 }
