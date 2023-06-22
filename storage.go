@@ -14,6 +14,7 @@ type Batcher struct {
 	size int
 
 	eventsReceived *Counter
+	eventsWritten  *Counter
 	eventsDropped  *Counter
 	batchAttempts  *Counter
 	batchErrors    *Counter
@@ -35,15 +36,19 @@ func NewBatcher(conn *pgx.Conn, size int) (*Batcher, error) {
 	if err != nil {
 		return nil, fmt.Errorf("events_received counter: %w", err)
 	}
+	b.eventsWritten, err = NewDimensionlessCounter("events_written", "Number of events written to database, tagged by type", eventTypeTag)
+	if err != nil {
+		return nil, fmt.Errorf("events_written counter: %w", err)
+	}
 	b.eventsDropped, err = NewDimensionlessCounter("events_dropped", "Number of events not written to database, tagged by type", eventTypeTag)
 	if err != nil {
-		return nil, fmt.Errorf("events_received counter: %w", err)
+		return nil, fmt.Errorf("events_dropped counter: %w", err)
 	}
 	b.batchAttempts, err = NewDimensionlessCounter("batch_attempts", "Number of batch writes attempted, tagged by type", eventTypeTag)
 	if err != nil {
 		return nil, fmt.Errorf("batch_attempts counter: %w", err)
 	}
-	b.batchAttempts, err = NewDimensionlessCounter("batch_errors", "Number of errors encountered while writing a batch, tagged by type", eventTypeTag)
+	b.batchErrors, err = NewDimensionlessCounter("batch_errors", "Number of errors encountered while writing a batch, tagged by type", eventTypeTag)
 	if err != nil {
 		return nil, fmt.Errorf("batch_errors counter: %w", err)
 	}
@@ -111,7 +116,9 @@ func (b *Batcher) flush(ctx context.Context) error {
 			b.batchErrors.Add(mctx, 1)
 			b.eventsDropped.Add(mctx, int64(batchSize))
 			logger.Error("exec batch failed", err)
+			continue
 		}
+		b.eventsWritten.Add(mctx, int64(batchSize))
 	}
 
 	b.traces = make(map[EventType][]*TraceEvent)
