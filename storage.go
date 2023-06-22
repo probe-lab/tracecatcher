@@ -14,6 +14,9 @@ type Batcher struct {
 	size int
 
 	eventsReceived *Counter
+	eventsDropped  *Counter
+	batchAttempts  *Counter
+	batchErrors    *Counter
 
 	mu     sync.Mutex
 	traces map[EventType][]*TraceEvent
@@ -27,11 +30,23 @@ func NewBatcher(conn *pgx.Conn, size int) (*Batcher, error) {
 		traces: make(map[EventType][]*TraceEvent),
 	}
 
-	er, err := NewDimensionlessCounter("events_received", "Number of events received, tagged by type", eventTypeTag)
+	var err error
+	b.eventsReceived, err = NewDimensionlessCounter("events_received", "Number of events received, tagged by type", eventTypeTag)
 	if err != nil {
-		return nil, fmt.Errorf("new gauge: %w", err)
+		return nil, fmt.Errorf("events_received counter: %w", err)
 	}
-	b.eventsReceived = er
+	b.eventsDropped, err = NewDimensionlessCounter("events_dropped", "Number of events not written to database, tagged by type", eventTypeTag)
+	if err != nil {
+		return nil, fmt.Errorf("events_received counter: %w", err)
+	}
+	b.batchAttempts, err = NewDimensionlessCounter("batch_attempts", "Number of batch writes attempted, tagged by type", eventTypeTag)
+	if err != nil {
+		return nil, fmt.Errorf("batch_attempts counter: %w", err)
+	}
+	b.batchAttempts, err = NewDimensionlessCounter("batch_errors", "Number of errors encountered while writing a batch, tagged by type", eventTypeTag)
+	if err != nil {
+		return nil, fmt.Errorf("batch_errors counter: %w", err)
+	}
 
 	return b, err
 }
@@ -63,27 +78,39 @@ func (b *Batcher) flush(ctx context.Context) error {
 	// assumes mutex is held by caller
 	for evtype, evs := range b.traces {
 		logger := slog.With("event_type", evtype.Key(), "count", len(evs))
+		mctx := eventTypeContext(ctx, evtype.Key())
 
 		tbl, ok := eventDefs[evtype]
 		if !ok {
+			b.eventsDropped.Add(mctx, int64(len(evs)))
 			logger.Log(slog.LevelError, "skipping unknown event type")
 			continue
 		}
 
 		if tbl.BatchInsert == nil {
+			b.eventsDropped.Add(mctx, int64(len(evs)))
 			logger.Warn("skipping unhandled event type")
 			continue
 		}
 
-		batch, err := tbl.BatchInsert(ctx, evs)
+		b.batchAttempts.Add(mctx, 1)
+		batch, batchSize, err := tbl.BatchInsert(ctx, evs)
 		if err != nil {
-			logger.Error("failed to create insert batch", err, "event_type")
-			return fmt.Errorf("commit transaction: %w", err)
+			b.batchErrors.Add(mctx, 1)
+			b.eventsDropped.Add(mctx, int64(len(evs)))
+			logger.Error("failed to create insert batch", err)
+			continue
 		}
 
-		logger.Debug("persisting events")
+		if batchSize < len(evs) {
+			b.eventsDropped.Add(mctx, int64(len(evs)-batchSize))
+		}
+
+		logger.Debug("persisting events", "batch_size", batchSize, "dropped", len(evs)-batchSize)
 		if err := b.execBatch(ctx, batch); err != nil {
-			logger.Error("batch failed", err)
+			b.batchErrors.Add(mctx, 1)
+			b.eventsDropped.Add(mctx, int64(batchSize))
+			logger.Error("exec batch failed", err)
 		}
 	}
 
