@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"time"
@@ -69,6 +70,8 @@ func (s *Server) BulkTraceHandler(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	} else {
+		// TODO: debug incoming requests
+		fmt.Println(reqBuf.String())
 		reqDec := json.NewDecoder(bytes.NewReader(reqBuf.Bytes()))
 		for reqDec.More() {
 			var tracEv TraceEvent
