@@ -155,15 +155,11 @@ func run(cc *cli.Context) error {
 	ctx, cancel := context.WithCancel(cc.Context)
 	defer cancel()
 
-	conn, err := connect(ctx, options.dbHost, options.dbPort, options.dbName, options.dbSSLMode, options.dbUser, options.dbPassword)
+	pool, err := connect(ctx, options.dbHost, options.dbPort, options.dbName, options.dbSSLMode, options.dbUser, options.dbPassword)
 	if err != nil {
 		slog.Error("pgconn failed to connect", err)
 		return err
 	}
-	defer func() {
-		slog.Info("closing database connection")
-		conn.Close(context.Background())
-	}()
 
 	rg := new(RunGroup)
 
@@ -178,7 +174,7 @@ func run(cc *cli.Context) error {
 		rg.Add(dr)
 	}
 
-	bat, err := NewBatcher(conn, options.batchSize)
+	bat, err := NewBatcher(pool, options.batchSize)
 	if err != nil {
 		return fmt.Errorf("failed to create batcher: %w", err)
 	}
