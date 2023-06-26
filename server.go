@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"time"
@@ -13,13 +14,27 @@ import (
 )
 
 type Server struct {
-	batcher *Batcher
+	batcher                   *Batcher
+	requestsReceived          *Counter
+	malformedRequestsReceived *Counter
 }
 
 func NewServer(batcher *Batcher) (*Server, error) {
-	return &Server{
+	s := &Server{
 		batcher: batcher,
-	}, nil
+	}
+
+	var err error
+	s.requestsReceived, err = NewDimensionlessCounter("http_request_count", "Number of http requests received, tagged by endpoint", endpointTag)
+	if err != nil {
+		return nil, fmt.Errorf("http_request_count counter: %w", err)
+	}
+	s.malformedRequestsReceived, err = NewDimensionlessCounter("http_request_malformed", "Number of malformed http requests received, tagged by endpoint", endpointTag)
+	if err != nil {
+		return nil, fmt.Errorf("http_request_malformed counter: %w", err)
+	}
+
+	return s, nil
 }
 
 func (s *Server) ConfigureRoutes(r *mux.Router) {
@@ -37,9 +52,13 @@ func (s *Server) NotFoundHandler(w http.ResponseWriter, r *http.Request) {
 func (s *Server) TraceHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Elastic-Product", "Elasticsearch")
 
+	mctx := endpointContext(r.Context(), "_doc")
+	s.requestsReceived.Add(mctx, 1)
+
 	buf := new(bytes.Buffer)
 	if _, err := buf.ReadFrom(r.Body); err != nil {
 		slog.Error("read body", err)
+		s.malformedRequestsReceived.Add(mctx, 1)
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
@@ -47,6 +66,7 @@ func (s *Server) TraceHandler(w http.ResponseWriter, r *http.Request) {
 	event := new(TraceEvent)
 	if err := json.Unmarshal(buf.Bytes(), &event); err != nil {
 		slog.Error("unmarshal body", err)
+		s.malformedRequestsReceived.Add(mctx, 1)
 		w.WriteHeader(http.StatusBadRequest)
 		return
 
@@ -58,6 +78,10 @@ func (s *Server) TraceHandler(w http.ResponseWriter, r *http.Request) {
 func (s *Server) BulkTraceHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Elastic-Product", "Elasticsearch")
 	// return vars
+
+	mctx := endpointContext(r.Context(), "_bulk")
+	s.requestsReceived.Add(mctx, 1)
+
 	iniT := time.Now()
 	var total, successful, empty, failed int
 	var bulkResp esutil.BulkIndexerResponse
@@ -66,6 +90,7 @@ func (s *Server) BulkTraceHandler(w http.ResponseWriter, r *http.Request) {
 	defer r.Body.Close()
 	if _, err := reqBuf.ReadFrom(r.Body); err != nil {
 		slog.Error("read body", err)
+		s.malformedRequestsReceived.Add(mctx, 1)
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	} else {
@@ -79,6 +104,7 @@ func (s *Server) BulkTraceHandler(w http.ResponseWriter, r *http.Request) {
 				total++
 				failed++
 				slog.Error("decoding ES trace:", decErr)
+				s.malformedRequestsReceived.Add(mctx, 1)
 				continue
 			} else {
 				total++
@@ -103,6 +129,7 @@ func (s *Server) BulkTraceHandler(w http.ResponseWriter, r *http.Request) {
 		jres, err := json.Marshal(bulkResp)
 		if err != nil {
 			slog.Error("unable to compose bulk response", err)
+			s.malformedRequestsReceived.Add(mctx, 1)
 			w.WriteHeader(http.StatusBadRequest)
 		}
 		w.Write(jres)
