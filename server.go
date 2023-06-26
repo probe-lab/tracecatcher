@@ -25,11 +25,11 @@ func NewServer(batcher *Batcher) (*Server, error) {
 	}
 
 	var err error
-	s.requestsReceived, err = NewDimensionlessCounter("http_request_count", "Number of http requests received, tagged by endpoint", eventTypeTag)
+	s.requestsReceived, err = NewDimensionlessCounter("http_request_count", "Number of http requests received, tagged by endpoint", endpointTag)
 	if err != nil {
 		return nil, fmt.Errorf("http_request_count counter: %w", err)
 	}
-	s.malformedRequestsReceived, err = NewDimensionlessCounter("http_request_malformed", "Number of malformed http requests received, tagged by endpoint", eventTypeTag)
+	s.malformedRequestsReceived, err = NewDimensionlessCounter("http_request_malformed", "Number of malformed http requests received, tagged by endpoint", endpointTag)
 	if err != nil {
 		return nil, fmt.Errorf("http_request_malformed counter: %w", err)
 	}
