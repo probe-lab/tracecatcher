@@ -6,11 +6,12 @@ import (
 	"sync"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"golang.org/x/exp/slog"
 )
 
 type Batcher struct {
-	conn *pgx.Conn
+	pool *pgxpool.Pool
 	size int
 
 	eventsReceived *Counter
@@ -24,9 +25,9 @@ type Batcher struct {
 	count  int
 }
 
-func NewBatcher(conn *pgx.Conn, size int) (*Batcher, error) {
+func NewBatcher(pool *pgxpool.Pool, size int) (*Batcher, error) {
 	b := &Batcher{
-		conn:   conn,
+		pool:   pool,
 		size:   size,
 		traces: make(map[EventType][]*TraceEvent),
 	}
@@ -127,7 +128,13 @@ func (b *Batcher) flush(ctx context.Context) error {
 }
 
 func (b *Batcher) execBatch(ctx context.Context, batch *pgx.Batch) error {
-	tx, err := b.conn.Begin(ctx)
+	conn, err := b.pool.Acquire(ctx)
+	if err != nil {
+		return fmt.Errorf("acquire conn: %w", err)
+	}
+	defer conn.Release()
+
+	tx, err := conn.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("begin transaction: %w", err)
 	}

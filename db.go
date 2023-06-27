@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"golang.org/x/exp/slog"
 )
@@ -20,25 +21,36 @@ func connect(ctx context.Context,
 	dbSSLMode string,
 	dbUser string,
 	dbPassword string,
-) (*pgx.Conn, error) {
+) (*pgxpool.Pool, error) {
 	slog.Info("connecting to database", "host", dbHost, "port", dbPort, "dbname", dbName)
 
 	dsn := fmt.Sprintf("host=%s port=%d dbname=%s sslmode=%s user=%s password=%s",
 		dbHost, dbPort, dbName, dbSSLMode, dbUser, dbPassword)
 
-	conn, err := pgx.Connect(ctx, dsn)
+	conf, err := pgxpool.ParseConfig(dsn)
 	if err != nil {
-		return nil, fmt.Errorf("pgconn connect: %w", err)
+		return nil, fmt.Errorf("unable to parse connection string: %w", err)
 	}
+
+	pool, err := pgxpool.NewWithConfig(context.Background(), conf)
+	if err != nil {
+		return nil, fmt.Errorf("unable to connect to database: %w", err)
+	}
+
+	conn, err := pool.Acquire(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("acquire conn: %w", err)
+	}
+	defer conn.Release()
 
 	if err := ensureDatabaseSchema(ctx, conn); err != nil {
 		return nil, fmt.Errorf("ensure schema exists: %w", err)
 	}
 
-	return conn, nil
+	return pool, nil
 }
 
-func ensureDatabaseSchema(ctx context.Context, conn *pgx.Conn) error {
+func ensureDatabaseSchema(ctx context.Context, conn *pgxpool.Conn) error {
 	slog.Info("ensuring database schema exists")
 
 	tx, err := conn.Begin(ctx)
