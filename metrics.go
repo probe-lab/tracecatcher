@@ -6,6 +6,7 @@ import (
 
 	"contrib.go.opencensus.io/exporter/prometheus"
 	prom "github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/collectors"
 	"go.opencensus.io/stats"
 	"go.opencensus.io/stats/view"
 	"go.opencensus.io/tag"
@@ -92,7 +93,7 @@ func NewDimensionlessCounter(name string, desc string, tagKeys ...tag.Key) (*Cou
 
 func RegisterPrometheusExporter(namespace string) (*prometheus.Exporter, error) {
 	registry := prom.NewRegistry()
-	registry.MustRegister(prom.NewGoCollector(), prom.NewProcessCollector(prom.ProcessCollectorOpts{}))
+	registry.MustRegister(collectors.NewGoCollector(), collectors.NewProcessCollector(prom.ProcessCollectorOpts{}))
 
 	pe, err := prometheus.NewExporter(prometheus.Options{
 		Namespace: namespace,
