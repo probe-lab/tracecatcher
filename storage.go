@@ -77,7 +77,6 @@ func (b *Batcher) Add(ctx context.Context, e *TraceEvent) {
 			return
 		}
 	}
-	return
 }
 
 func (b *Batcher) flush(ctx context.Context) error {
