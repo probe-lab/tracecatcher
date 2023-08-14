@@ -93,7 +93,7 @@ func NewDimensionlessCounter(name string, desc string, tagKeys ...tag.Key) (*Cou
 
 func RegisterPrometheusExporter(namespace string) (*prometheus.Exporter, error) {
 	registry := prom.NewRegistry()
-	registry.MustRegister(collectors.NewGoCollector(), collectors.NewProcessCollector(prom.ProcessCollectorOpts{}))
+	registry.MustRegister(collectors.NewGoCollector(), collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}))
 
 	pe, err := prometheus.NewExporter(prometheus.Options{
 		Namespace: namespace,
