@@ -1,4 +1,4 @@
-module github.com/iand/tracecatcher
+module github.com/probe-lab/tracecatcher
 
 go 1.20
 

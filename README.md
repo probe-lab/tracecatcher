@@ -34,7 +34,7 @@ The following event types are not yet supported:
 
 As of Go 1.19, install the latest tracecatcher executable using:
 
-	go install github.com/iand/tracecatcher@latest
+	go install github.com/probe-lab/tracecatcher@latest
 
 This will download and build an ipfsfiled binary in `$GOBIN`
 
@@ -80,8 +80,8 @@ LOTUS_PUBSUB_ELASTICSEARCHINDEX=traces
 
 This software is dual-licensed under Apache 2.0 and MIT terms:
 
-- Apache License, Version 2.0, ([LICENSE-APACHE](https://github.com/iand/tracecatcher/blob/master/LICENSE-APACHE) or http://www.apache.org/licenses/LICENSE-2.0)
-- MIT license ([LICENSE-MIT](https://github.com/fiand/tracecatcher/blob/master/LICENSE-MIT) or http://opensource.org/licenses/MIT)
+- Apache License, Version 2.0, ([LICENSE-APACHE](https://github.com/probe-lab/tracecatcher/blob/master/LICENSE-APACHE) or http://www.apache.org/licenses/LICENSE-2.0)
+- MIT license ([LICENSE-MIT](https://github.com/fprobe-lab/tracecatcher/blob/master/LICENSE-MIT) or http://opensource.org/licenses/MIT)
 
 
 
