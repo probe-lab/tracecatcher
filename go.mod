@@ -2,7 +2,6 @@ module github.com/probe-lab/tracecatcher
 
 go 1.21
 
-
 require (
 	contrib.go.opencensus.io/exporter/prometheus v0.4.2
 	github.com/elastic/go-elasticsearch/v7 v7.17.7
