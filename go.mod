@@ -1,6 +1,6 @@
 module github.com/probe-lab/tracecatcher
 
-go 1.22
+go 1.23
 
 require (
 	contrib.go.opencensus.io/exporter/prometheus v0.4.2
